@@ -1,0 +1,58 @@
+# Verification for the backfill-throttle-retry patch.
+#
+# The patch is small but two of its four hunks fail SILENTLY if they regress:
+#
+#   - backfill.go does not import "time" upstream. Miss that hunk and the build
+#     breaks loudly, which is fine -- `go build` covers it.
+#   - config/upgrade.go must register the new keys. Miss THAT and everything still
+#     compiles and runs; the bridge just deletes the settings from config.yaml the
+#     first time it rewrites it, and backfill silently reverts to no pacing and no
+#     retry. Nothing about that is visible until Discord rate-limits you.
+#
+# So the round-trip check below is the important one: it writes a sentinel value,
+# makes the bridge upgrade its own config offline (-g needs no homeserver), and
+# fails if the value did not survive.
+name: verify patch
+on:
+  push:
+    branches: [backfill-throttle-retry]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y libolm-dev
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l backfill.go config/bridge.go config/upgrade.go)
+          if [ -n "$out" ]; then echo "not gofmt-clean:"; echo "$out"; exit 1; fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test ./...
+
+      - name: Build
+        run: go build -o /tmp/mautrix-discord
+
+      - name: Config upgrade round-trip keeps the new keys
+        run: |
+          cp example-config.yaml /tmp/config.yaml
+          sed -i 's/^        fetch_delay_ms: 500$/        fetch_delay_ms: 1234/' /tmp/config.yaml
+          sed -i 's/^    domain: example.com$/    domain: test.local/' /tmp/config.yaml
+          /tmp/mautrix-discord -c /tmp/config.yaml -r /tmp/registration.yaml -g
+          echo "--- backfill block after upgrade ---"
+          sed -n '/^        max_guild_members:/,/^$/p' /tmp/config.yaml
+          grep -q 'fetch_delay_ms: 1234'    /tmp/config.yaml || { echo "FAIL: fetch_delay_ms stripped or reset"; exit 1; }
+          grep -q 'retry_interval_ms: 30000' /tmp/config.yaml || { echo "FAIL: retry_interval_ms stripped"; exit 1; }
+          grep -q 'max_retries: 5'           /tmp/config.yaml || { echo "FAIL: max_retries stripped"; exit 1; }
+          echo "OK: all three keys survived the config upgrade"
