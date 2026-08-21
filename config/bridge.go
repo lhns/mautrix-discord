@@ -83,6 +83,9 @@ type BridgeConfig struct {
 			Missed  BackfillLimitPart `yaml:"missed"`
 		} `yaml:"forward_limits"`
 		MaxGuildMembers int `yaml:"max_guild_members"`
+		FetchDelayMS    int `yaml:"fetch_delay_ms"`
+		RetryIntervalMS int `yaml:"retry_interval_ms"`
+		MaxRetries      int `yaml:"max_retries"`
 	} `yaml:"backfill"`
 
 	Encryption bridgeconfig.EncryptionConfig `yaml:"encryption"`

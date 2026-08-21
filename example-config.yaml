@@ -262,6 +262,13 @@ bridge:
         # This can be used as a rough heuristic to disable backfilling in channels that are too active.
         # Currently only applies to missed message backfill.
         max_guild_members: -1
+        # Delay in milliseconds between message-fetch requests while backfilling.
+        # 0 = upstream behaviour (as fast as the ratelimiter allows).
+        fetch_delay_ms: 500
+        # If a fetch fails, wait this long and retry, up to max_retries times. Exists because
+        # discordgo returns early WITHOUT retrying when a 429 body is not JSON (Cloudflare HTML).
+        retry_interval_ms: 30000
+        max_retries: 5
 
     # End-to-bridge encryption support options.
     #

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/rs/zerolog"
@@ -117,9 +118,19 @@ func (portal *Portal) collectBackfillMessages(log zerolog.Logger, source *User, 
 	}
 	for {
 		log.Debug().Str("before_id", before).Msg("Fetching messages for backfill")
-		newMessages, err := source.Session.ChannelMessages(protoChannelID, messageFetchChunkSize, before, "", "", portal.RefererOptIfUser(source.Session, protoChannelID)...)
-		if err != nil {
-			return nil, false, err
+		bfCfg := portal.bridge.Config.Bridge.Backfill
+		var newMessages []*discordgo.Message
+		var err error
+		for attempt := 0; ; attempt++ {
+			newMessages, err = source.Session.ChannelMessages(protoChannelID, messageFetchChunkSize, before, "", "", portal.RefererOptIfUser(source.Session, protoChannelID)...)
+			if err == nil {
+				break
+			} else if attempt >= bfCfg.MaxRetries {
+				log.Err(err).Int("attempts", attempt+1).Msg("Giving up fetching messages for backfill")
+				return nil, false, err
+			}
+			log.Warn().Err(err).Int("attempt", attempt+1).Int("retry_in_ms", bfCfg.RetryIntervalMS).Msg("Failed to fetch messages for backfill, retrying")
+			time.Sleep(time.Duration(bfCfg.RetryIntervalMS) * time.Millisecond)
 		}
 		if until != "" {
 			for i, msg := range newMessages {
@@ -140,6 +151,9 @@ func (portal *Portal) collectBackfillMessages(log zerolog.Logger, source *User, 
 			break
 		}
 		before = newMessages[len(newMessages)-1].ID
+		if bfCfg.FetchDelayMS > 0 {
+			time.Sleep(time.Duration(bfCfg.FetchDelayMS) * time.Millisecond)
+		}
 	}
 	if len(messages) > limit {
 		foundAll = false
