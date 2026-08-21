@@ -15,7 +15,7 @@
 name: verify patch
 on:
   push:
-    branches: [backfill-throttle-retry, dm-relay]
+    branches: [fork, backfill-throttle-retry, dm-relay]
   pull_request:
   workflow_dispatch:
 

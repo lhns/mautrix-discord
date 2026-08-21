@@ -1,9 +1,16 @@
 # Builds the patched bridge and publishes it to GHCR.
 #
-# Why this fork exists at all: upstream's backfill fetch loop has no pacing and no
-# retry, and discordgo silently skips its own retry when a 429 body is not JSON
-# (Cloudflare HTML). The result is truncated history that reports success. See the
-# patch commit and mautrix/discord#157.
+# `fork` is the INTEGRATION branch: it is what this cluster deploys, and the only
+# branch images are published from. Feature branches (backfill-throttle-retry,
+# dm-relay, ...) stay reviewable against upstream and merge in here.
+#
+# Patches currently carried:
+#   - backfill fetch pacing + bounded retry. Upstream's fetch loop has no pacing
+#     and no retry, and discordgo silently skips its own retry when a 429 body is
+#     not JSON (Cloudflare HTML), producing truncated history that reports
+#     success. See mautrix/discord#157.
+#   - DM relay through the portal receiver's own account, because `set-relay` is
+#     webhook-based and Discord has no webhook API for DMs.
 #
 # Tagging is deliberately explicit rather than :latest. The k0s-flux deployment pins
 # a digest, and a floating tag on a FORK is how you end up not knowing which patch
@@ -15,14 +22,14 @@
 name: build image
 on:
   push:
-    branches: [backfill-throttle-retry]
+    branches: [fork]
   workflow_dispatch:
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/mautrix-discord
   # Upstream release this patch is applied on top of, plus the patch level.
   BASE_VERSION: v0.7.7
-  PATCH_LEVEL: throttle.1
+  PATCH_LEVEL: lhns.1
 
 jobs:
   build:
@@ -52,7 +59,7 @@ jobs:
             ${{ env.IMAGE }}:sha-${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.description=mautrix-discord ${{ env.BASE_VERSION }} with configurable backfill fetch delay and bounded retry
+            org.opencontainers.image.description=mautrix-discord ${{ env.BASE_VERSION }} with configurable backfill fetch delay, bounded retry, and DM relay
             org.opencontainers.image.licenses=AGPL-3.0-or-later
 
       - name: Report digest
