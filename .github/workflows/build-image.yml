@@ -1,0 +1,65 @@
+# Builds the patched bridge and publishes it to GHCR.
+#
+# Why this fork exists at all: upstream's backfill fetch loop has no pacing and no
+# retry, and discordgo silently skips its own retry when a 429 body is not JSON
+# (Cloudflare HTML). The result is truncated history that reports success. See the
+# patch commit and mautrix/discord#157.
+#
+# Tagging is deliberately explicit rather than :latest. The k0s-flux deployment pins
+# a digest, and a floating tag on a FORK is how you end up not knowing which patch
+# level is running. `-throttle.N` is bumped by hand when the patch itself changes;
+# the sha tag is what makes any build individually addressable.
+#
+# amd64 only: every node in the target cluster is amd64 (verified), and arm64 would
+# roughly double build time for an image nothing would pull.
+name: build image
+on:
+  push:
+    branches: [backfill-throttle-retry]
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/mautrix-discord
+  # Upstream release this patch is applied on top of, plus the patch level.
+  BASE_VERSION: v0.7.7
+  PATCH_LEVEL: throttle.1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ env.BASE_VERSION }}-${{ env.PATCH_LEVEL }}
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=mautrix-discord ${{ env.BASE_VERSION }} with configurable backfill fetch delay and bounded retry
+            org.opencontainers.image.licenses=AGPL-3.0-or-later
+
+      - name: Report digest
+        run: |
+          echo "### Image published" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ env.IMAGE }}:${{ env.BASE_VERSION }}-${{ env.PATCH_LEVEL }}" >> $GITHUB_STEP_SUMMARY
+          echo "digest: ${{ steps.push.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "Pin this digest in k0s-flux." >> $GITHUB_STEP_SUMMARY
