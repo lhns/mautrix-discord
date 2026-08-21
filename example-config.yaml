@@ -270,6 +270,34 @@ bridge:
         retry_interval_ms: 30000
         max_retries: 5
 
+    # Relay for DIRECT MESSAGE portals.
+    #
+    # The `set-relay` webhook relay only works on guild channels -- Discord has
+    # no webhook API for DMs. This instead sends messages from other Matrix
+    # users through the portal RECEIVER'S OWN Discord account, with the sender's
+    # name prefixed, exactly like mautrix-whatsapp's relay.
+    #
+    # NOTE the message appears on Discord as sent BY YOU. A DM has no third
+    # identity to speak as, so there is no way to avoid that. Only enable this
+    # if everyone involved understands it.
+    relay:
+        # Whether relaying is enabled for DM portals at all.
+        enabled: false
+        # Only relay messages from users with the `admin` permission level.
+        # With false, anyone at `relay` level or above is relayed.
+        admin_only: true
+        # Templates for the relayed message body, per Matrix message type.
+        # Discord renders markdown, not HTML, so these are markdown.
+        message_formats:
+            m.text: "**{{ .Sender.Displayname }}**: {{ .Message }}"
+            m.notice: "**{{ .Sender.Displayname }}**: {{ .Message }}"
+            m.emote: "* **{{ .Sender.Displayname }}** {{ .Message }}"
+            m.file: "**{{ .Sender.Displayname }}** sent a file: {{ .Message }}"
+            m.image: "**{{ .Sender.Displayname }}** sent an image: {{ .Message }}"
+            m.audio: "**{{ .Sender.Displayname }}** sent an audio file: {{ .Message }}"
+            m.video: "**{{ .Sender.Displayname }}** sent a video: {{ .Message }}"
+            m.location: "**{{ .Sender.Displayname }}** sent a location: {{ .Message }}"
+
     # End-to-bridge encryption support options.
     #
     # See https://docs.mau.fi/bridges/general/end-to-bridge-encryption.html for more info.

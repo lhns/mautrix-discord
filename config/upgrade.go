@@ -132,9 +132,9 @@ func DoUpgrade(helper *up.Helper) {
 	helper.Copy(up.Bool, "bridge", "provisioning", "debug_endpoints")
 
 	helper.Copy(up.Map, "bridge", "permissions")
-	//helper.Copy(up.Bool, "bridge", "relay", "enabled")
-	//helper.Copy(up.Bool, "bridge", "relay", "admin_only")
-	//helper.Copy(up.Map, "bridge", "relay", "message_formats")
+	helper.Copy(up.Bool, "bridge", "relay", "enabled")
+	helper.Copy(up.Bool, "bridge", "relay", "admin_only")
+	helper.Copy(up.Map, "bridge", "relay", "message_formats")
 }
 
 var SpacedBlocks = [][]string{
@@ -150,6 +150,6 @@ var SpacedBlocks = [][]string{
 	{"bridge", "encryption"},
 	{"bridge", "provisioning"},
 	{"bridge", "permissions"},
-	//{"bridge", "relay"},
+	{"bridge", "relay"},
 	{"logging"},
 }

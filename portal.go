@@ -1536,6 +1536,25 @@ func (portal *Portal) handleMatrixMessage(sender *User, evt *event.Event) {
 
 	channelID := portal.Key.ChannelID
 	sess := sender.Session
+
+	// DM relay. A private chat has no webhook to speak through (Discord only
+	// offers webhooks on guild channels), so a message from anyone who is not
+	// the portal receiver goes out through the RECEIVER'S OWN session with the
+	// sender's name prefixed -- the mautrix-whatsapp model.
+	//
+	// `sender` is deliberately reassigned to the receiver here: every use below
+	// it (sess, attachment upload via sender.Session, the IsPrivateChat receiver
+	// check) must act as the account that actually sends. relayOrigin keeps the
+	// real Matrix sender for the name prefix and for database attribution.
+	var relayOrigin *User
+	if portal.IsPrivateChat() && sender.DiscordID != portal.Key.Receiver {
+		if receiver := portal.dmRelayReceiver(sender); receiver != nil {
+			relayOrigin = sender
+			sender = receiver
+			sess = receiver.Session
+		}
+	}
+
 	if sess == nil && portal.RelayWebhookID == "" {
 		go portal.sendMessageMetrics(evt, errUserNotLoggedIn, "Ignoring")
 		return
@@ -1714,6 +1733,11 @@ func (portal *Portal) handleMatrixMessage(sender *User, evt *event.Event) {
 		go portal.sendMessageMetrics(evt, fmt.Errorf("%w %q", errUnknownMsgType, content.MsgType), "Ignoring")
 		return
 	}
+	if relayOrigin != nil {
+		displayname, _ := portal.getRelayUserMeta(relayOrigin)
+		sendReq.Content = portal.bridge.Config.Bridge.FormatRelayMessage(
+			string(content.MsgType), relayOrigin.MXID.String(), displayname, sendReq.Content)
+	}
 	silentReply := content.Mentions != nil && replyToMXID != "" &&
 		(len(content.Mentions.UserIDs) == 0 || (replyToUser != "" && !slices.Contains(content.Mentions.UserIDs, replyToUser)))
 	if silentReply && sendReq.AllowedMentions != nil {
@@ -1773,6 +1797,11 @@ func (portal *Portal) handleMatrixMessage(sender *User, evt *event.Event) {
 			dbMsg.SenderID = portal.RelayWebhookID
 		}
 		dbMsg.SenderMXID = sender.MXID
+		if relayOrigin != nil {
+			// Attribute to whoever actually wrote it on Matrix, not to the
+			// account that relayed it out.
+			dbMsg.SenderMXID = relayOrigin.MXID
+		}
 		dbMsg.Timestamp, _ = discordgo.SnowflakeTimestamp(msg.ID)
 		dbMsg.ThreadID = threadID
 		dbMsg.Insert()
@@ -2670,4 +2699,30 @@ func (br *DiscordBridge) HandleTombstone(evt *event.Event) {
 	portal.Update()
 	portal.log.Info().Msg("Followed tombstone and updated portal MXID")
 	portal.UpdateBridgeInfo()
+}
+
+// dmRelayReceiver returns the portal receiver's User when `sender` may be
+// relayed through it in a DM portal, or nil when relaying does not apply.
+//
+// Gating mirrors mautrix-whatsapp: relay must be enabled, and the sender must
+// clear the configured permission level (admin when admin_only, otherwise the
+// `relay` level). The receiver must also actually be connected -- there is no
+// point rewriting the sender if nothing can send.
+func (portal *Portal) dmRelayReceiver(sender *User) *User {
+	cfg := portal.bridge.Config.Bridge.Relay
+	if !cfg.Enabled {
+		return nil
+	}
+	minLevel := bridgeconfig.PermissionLevelRelay
+	if cfg.AdminOnly {
+		minLevel = bridgeconfig.PermissionLevelAdmin
+	}
+	if sender.PermissionLevel < minLevel {
+		return nil
+	}
+	receiver := portal.bridge.GetUserByID(portal.Key.Receiver)
+	if receiver == nil || receiver.Session == nil {
+		return nil
+	}
+	return receiver
 }

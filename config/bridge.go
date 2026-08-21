@@ -88,6 +88,23 @@ type BridgeConfig struct {
 		MaxRetries      int `yaml:"max_retries"`
 	} `yaml:"backfill"`
 
+	// Relay for DIRECT MESSAGE portals.
+	//
+	// The guild relay (portal.RelayWebhookID, `set-relay`) cannot serve DMs:
+	// it is built on Discord webhooks, and WebhookCreate only exists for guild
+	// channels -- hence `set-relay`'s "Only guild channels can have relays".
+	//
+	// So DM relaying uses the same model as mautrix-whatsapp instead: messages
+	// from Matrix users who are not the portal receiver are sent through the
+	// RECEIVER'S OWN Discord account, with the sender's name prefixed into the
+	// body. On Discord the message therefore appears as the receiver's, which
+	// is unavoidable -- a DM has no third identity to speak as.
+	Relay struct {
+		Enabled        bool              `yaml:"enabled"`
+		AdminOnly      bool              `yaml:"admin_only"`
+		MessageFormats map[string]string `yaml:"message_formats"`
+	} `yaml:"relay"`
+
 	Encryption bridgeconfig.EncryptionConfig `yaml:"encryption"`
 
 	Provisioning struct {
@@ -240,4 +257,45 @@ func (bc BridgeConfig) FormatGuildName(params GuildNameParams) string {
 	var buffer strings.Builder
 	_ = bc.guildNameTemplate.Execute(&buffer, params)
 	return buffer.String()
+}
+
+// RelayFormatParams is the data passed to bridge.relay.message_formats templates.
+type RelayFormatParams struct {
+	Sender  RelayFormatSender
+	Message string
+}
+
+// RelayFormatSender mirrors the field names mautrix-whatsapp exposes, so the
+// templates people already have ({{ .Sender.Displayname }}) work unchanged.
+type RelayFormatSender struct {
+	UserID      string
+	Displayname string
+}
+
+const defaultRelayFormat = "**{{ .Sender.Displayname }}**: {{ .Message }}"
+
+// FormatRelayMessage renders the relay prefix for a message type. Discord
+// renders markdown rather than HTML, so the defaults are markdown -- this is
+// where the format differs from mautrix-whatsapp, not in the semantics.
+//
+// Templates are parsed per call rather than cached: relayed messages are rare,
+// and a bad template must not be able to wedge the send path permanently.
+func (bc *BridgeConfig) FormatRelayMessage(msgType, userID, displayname, message string) string {
+	tplText, ok := bc.Relay.MessageFormats[msgType]
+	if !ok || tplText == "" {
+		tplText = defaultRelayFormat
+	}
+	tpl, err := template.New("relay").Parse(tplText)
+	if err != nil {
+		return fmt.Sprintf("%s: %s", displayname, message)
+	}
+	var buf strings.Builder
+	err = tpl.Execute(&buf, RelayFormatParams{
+		Sender:  RelayFormatSender{UserID: userID, Displayname: displayname},
+		Message: message,
+	})
+	if err != nil {
+		return fmt.Sprintf("%s: %s", displayname, message)
+	}
+	return buf.String()
 }

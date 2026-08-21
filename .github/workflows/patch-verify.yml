@@ -15,7 +15,7 @@
 name: verify patch
 on:
   push:
-    branches: [backfill-throttle-retry]
+    branches: [backfill-throttle-retry, dm-relay]
   pull_request:
   workflow_dispatch:
 
@@ -32,7 +32,7 @@ jobs:
 
       - name: gofmt
         run: |
-          out=$(gofmt -l backfill.go config/bridge.go config/upgrade.go)
+          out=$(gofmt -l backfill.go portal.go config/bridge.go config/upgrade.go)
           if [ -n "$out" ]; then echo "not gofmt-clean:"; echo "$out"; exit 1; fi
 
       - name: go vet
@@ -56,3 +56,28 @@ jobs:
           grep -q 'retry_interval_ms: 30000' /tmp/config.yaml || { echo "FAIL: retry_interval_ms stripped"; exit 1; }
           grep -q 'max_retries: 5'           /tmp/config.yaml || { echo "FAIL: max_retries stripped"; exit 1; }
           echo "OK: all three keys survived the config upgrade"
+
+      - name: DM relay keys survive the config upgrade
+        run: |
+          cp example-config.yaml /tmp/relay-config.yaml
+          sed -i 's/^    domain: example.com$/    domain: test.local/' /tmp/relay-config.yaml
+          # Flip both scalars away from their defaults so a reset is distinguishable
+          # from a value that merely happens to match.
+          sed -i 's/^        enabled: false$/        enabled: true/'   /tmp/relay-config.yaml
+          sed -i 's/^        admin_only: true$/        admin_only: false/' /tmp/relay-config.yaml
+          /tmp/mautrix-discord -c /tmp/relay-config.yaml -r /tmp/relay-registration.yaml -g
+          echo "--- relay block after upgrade ---"
+          sed -n '/^    relay:/,/^    [a-z]/p' /tmp/relay-config.yaml
+          grep -q 'admin_only: false' /tmp/relay-config.yaml || { echo "FAIL: relay.admin_only stripped or reset"; exit 1; }
+          grep -q 'm.text: ' /tmp/relay-config.yaml           || { echo "FAIL: relay.message_formats stripped"; exit 1; }
+          echo "OK: relay config survived the config upgrade"
+
+      - name: DM relay is actually wired into the send path
+        run: |
+          # Guards against the config existing while nothing reads it -- the
+          # failure mode that would look exactly like "relay is enabled but
+          # nothing happens".
+          grep -q 'dmRelayReceiver' portal.go        || { echo "FAIL: dmRelayReceiver missing"; exit 1; }
+          grep -q 'FormatRelayMessage' portal.go     || { echo "FAIL: relay formatting not applied in portal.go"; exit 1; }
+          grep -q 'relayOrigin.MXID' portal.go       || { echo "FAIL: relayed messages would be misattributed in the database"; exit 1; }
+          echo "OK: relay wired into portal.go"
