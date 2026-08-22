@@ -429,11 +429,10 @@ func fnSetRelay(ce *WrappedCommandEvent) {
 		return
 	}
 	log := ce.ZLog.With().Str("channel_id", portal.Key.ChannelID).Logger()
-	if portal.IsPrivateChat() {
-		// DMs have no webhook to speak through -- WebhookCreate is guild-only --
-		// so relaying here means sending through the invoking user's own Discord
-		// session instead. Only the portal receiver can do that: nobody else's
-		// account is in this conversation.
+	if portal.GuildID == "" {
+		// DMs and group DMs have no webhook to speak through -- WebhookCreate is
+		// guild-only -- so relaying here means sending through a Matrix user's own
+		// Discord session instead.
 		relayCfg := portal.bridge.Config.Bridge.Relay
 		if !relayCfg.Enabled {
 			ce.Reply("Relay mode is not enabled in the bridge config")
@@ -441,7 +440,10 @@ func fnSetRelay(ce *WrappedCommandEvent) {
 		} else if relayCfg.AdminOnly && ce.User.PermissionLevel < bridgeconfig.PermissionLevelAdmin {
 			ce.Reply("Only bridge admins are allowed to enable relay mode")
 			return
-		} else if ce.User.DiscordID != portal.Key.Receiver {
+		} else if portal.Key.Receiver != "" && ce.User.DiscordID != portal.Key.Receiver {
+			// 1:1 DMs have exactly one account that is party to the conversation,
+			// so it must be that one. Group DMs carry no receiver on the portal,
+			// so whoever runs the command becomes the relay account.
 			ce.Reply("Only the Discord account this DM belongs to can relay for it")
 			return
 		} else if ce.User.Session == nil {
@@ -460,10 +462,7 @@ func fnSetRelay(ce *WrappedCommandEvent) {
 			"to Discord through your account, prefixed with the sender's name.")
 		return
 	}
-	if portal.GuildID == "" {
-		ce.Reply("Only guild channels and DMs can have relays")
-		return
-	} else if portal.RelayWebhookID != "" {
+	if portal.RelayWebhookID != "" {
 		webhookMeta, err := relayClient.WebhookWithToken(portal.RelayWebhookID, portal.RelayWebhookSecret)
 		if err != nil {
 			log.Warn().Err(err).Msg("Failed to get existing webhook info")
@@ -553,7 +552,7 @@ var cmdUnsetRelay = &commands.FullHandler{
 }
 
 func fnUnsetRelay(ce *WrappedCommandEvent) {
-	if ce.Portal.IsPrivateChat() {
+	if ce.Portal.GuildID == "" {
 		if ce.Portal.bridge.GetDMRelayUser(ce.Portal.Key) == "" {
 			ce.Reply("This DM doesn't have relaying enabled")
 			return

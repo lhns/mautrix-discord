@@ -1537,19 +1537,23 @@ func (portal *Portal) handleMatrixMessage(sender *User, evt *event.Event) {
 	channelID := portal.Key.ChannelID
 	sess := sender.Session
 
-	// DM relay. A private chat has no webhook to speak through (Discord only
-	// offers webhooks on guild channels), so a message from anyone who is not
-	// the portal receiver goes out through the relay user's OWN session with the
-	// sender's name prefixed -- the mautrix-whatsapp model. Opt-in per portal
-	// via `set-relay`, which records the relay user in the lhns_dm_relay table.
+	// DM relay, covering both 1:1 and group DMs ("DM" in the table and helper
+	// names means direct-or-group-direct). Neither has a webhook to speak through
+	// -- Discord only offers webhooks on guild channels -- so a message from
+	// anyone other than the relay user goes out through that user's OWN session
+	// with the sender's name prefixed, the mautrix-whatsapp model. Opt-in per
+	// portal via `set-relay`, which records the relay user in lhns_dm_relay.
 	//
 	// `sender` is deliberately reassigned to the relay user here: every use below
 	// it (sess, attachment upload via sender.Session, the IsPrivateChat receiver
 	// check) must act as the account that actually sends. relayOrigin keeps the
 	// real Matrix sender for the name prefix and for database attribution.
 	var relayOrigin *User
-	if portal.IsPrivateChat() && sender.DiscordID != portal.Key.Receiver {
-		if relayer := portal.dmRelayUser(); relayer != nil {
+	if portal.GuildID == "" {
+		// "relay unless the sender IS the relay user" -- correct for both DMs and
+		// group DMs, and needs no Discord IDs. Comparing sender.DiscordID against
+		// Key.Receiver would silently never fire in a group DM, where both are "".
+		if relayer := portal.dmRelayUser(); relayer != nil && relayer.MXID != sender.MXID {
 			relayOrigin = sender
 			sender = relayer
 			sess = relayer.Session
