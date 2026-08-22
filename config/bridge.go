@@ -241,6 +241,9 @@ type ChannelNameParams struct {
 	GuildName  string
 	NSFW       bool
 	Type       discordgo.ChannelType
+
+	// Other members of an untitled group DM, empty otherwise.
+	Participants string
 }
 
 func (bc BridgeConfig) FormatChannelName(params ChannelNameParams) string {

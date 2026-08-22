@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -2336,12 +2337,17 @@ func (portal *Portal) UpdateName(meta *discordgo.Channel) bool {
 	}
 	plainNameChanged := portal.PlainName != meta.Name
 	portal.PlainName = meta.Name
+	var participants string
+	if meta.Type == discordgo.ChannelTypeGroupDM {
+		participants = portal.groupDMParticipants()
+	}
 	return portal.UpdateNameDirect(portal.bridge.Config.Bridge.FormatChannelName(config.ChannelNameParams{
-		Name:       meta.Name,
-		ParentName: parentName,
-		GuildName:  guildName,
-		NSFW:       meta.NSFW,
-		Type:       meta.Type,
+		Name:         meta.Name,
+		ParentName:   parentName,
+		GuildName:    guildName,
+		NSFW:         meta.NSFW,
+		Type:         meta.Type,
+		Participants: participants,
 	}), false) || plainNameChanged
 }
 
@@ -2725,4 +2731,47 @@ func (portal *Portal) dmRelayUser() *User {
 		return nil
 	}
 	return relayer
+}
+
+// groupDMParticipants renders a group DM's members as "Alice, Bob", so untitled
+// ones get a real name instead of a client-generated title containing the bot.
+//
+// Uses the state store, not meta.Recipients: Recipients is absent from some
+// channel payloads (UpdateInfo refetches the channel to work around that), and a
+// name that can go empty would rename the room on every reconnect.
+func (portal *Portal) groupDMParticipants() string {
+	if portal.MXID == "" {
+		return ""
+	}
+	var others, all []string
+	for userID := range portal.bridge.StateStore.GetRoomMembers(portal.MXID, event.MembershipJoin) {
+		// nil for the bot and for real Matrix users; only ghosts parse.
+		puppet := portal.bridge.GetPuppetByMXID(userID)
+		if puppet == nil {
+			continue
+		}
+		name := puppet.GlobalName
+		if name == "" {
+			name = puppet.Username
+		}
+		if name == "" {
+			continue
+		}
+		all = append(all, name)
+		if portal.bridge.GetUserByID(puppet.ID) == nil {
+			others = append(others, name)
+		}
+	}
+	names := others
+	if len(names) == 0 {
+		names = all // everyone else left; better than showing the bot
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names) // map order would rename the room on every sync
+	if len(names) > 4 {
+		return fmt.Sprintf("%s +%d", strings.Join(names[:4], ", "), len(names)-4)
+	}
+	return strings.Join(names, ", ")
 }
