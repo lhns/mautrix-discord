@@ -272,19 +272,21 @@ bridge:
 
     # Relay for DIRECT MESSAGE portals.
     #
-    # The `set-relay` webhook relay only works on guild channels -- Discord has
-    # no webhook API for DMs. This instead sends messages from other Matrix
-    # users through the portal RECEIVER'S OWN Discord account, with the sender's
-    # name prefixed, exactly like mautrix-whatsapp's relay.
+    # In a guild channel `set-relay` creates a Discord webhook. DMs have no
+    # webhook API, so there `set-relay` instead marks the portal to send other
+    # users' messages through YOUR OWN Discord session, with the sender's name
+    # prefixed -- the mautrix-whatsapp model.
     #
-    # NOTE the message appears on Discord as sent BY YOU. A DM has no third
-    # identity to speak as, so there is no way to avoid that. Only enable this
-    # if everyone involved understands it.
+    # These options only gate who may turn it on; relaying is enabled per room
+    # with `set-relay` and turned off again with `unset-relay`.
+    #
+    # NOTE relayed messages appear on Discord as sent BY YOU. A DM has no third
+    # identity to speak as, so there is no way around that. Only enable this if
+    # everyone involved understands it.
     relay:
-        # Whether relaying is enabled for DM portals at all.
+        # Master switch. With false, `set-relay` refuses in DM portals.
         enabled: false
-        # Only relay messages from users with the `admin` permission level.
-        # With false, anyone at `relay` level or above is relayed.
+        # Whether only bridge admins may enable relaying on a DM portal.
         admin_only: true
         # Templates for the relayed message body, per Matrix message type.
         # Discord renders markdown, not HTML, so these are markdown.

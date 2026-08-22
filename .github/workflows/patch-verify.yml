@@ -77,7 +77,26 @@ jobs:
           # Guards against the config existing while nothing reads it -- the
           # failure mode that would look exactly like "relay is enabled but
           # nothing happens".
-          grep -q 'dmRelayReceiver' portal.go        || { echo "FAIL: dmRelayReceiver missing"; exit 1; }
+          grep -q 'dmRelayUser' portal.go            || { echo "FAIL: dmRelayUser missing"; exit 1; }
           grep -q 'FormatRelayMessage' portal.go     || { echo "FAIL: relay formatting not applied in portal.go"; exit 1; }
           grep -q 'relayOrigin.MXID' portal.go       || { echo "FAIL: relayed messages would be misattributed in the database"; exit 1; }
           echo "OK: relay wired into portal.go"
+
+      - name: Fork must not bump the database schema version
+        run: |
+          # The whole point of creating lhns_dm_relay outside the migration system
+          # is that `version` stays at whatever upstream knows, so the unforked
+          # image can still run against a database this fork has used. A new file
+          # in database/upgrades/ would silently take that away.
+          newest=$(ls database/upgrades/ | grep -oE '^[0-9]+' | sort -n | tail -1)
+          echo "newest migration: $newest"
+          if [ "$newest" -gt 24 ]; then
+            echo "FAIL: migration $newest added -- this breaks downgrading to upstream v0.7.7."
+            echo "Persist fork state in its own CREATE TABLE IF NOT EXISTS instead (see dmrelay.go)."
+            exit 1
+          fi
+          grep -q 'CREATE TABLE IF NOT EXISTS lhns_dm_relay' dmrelay.go || { echo "FAIL: relay table not self-created"; exit 1; }
+          if grep -rn 'ALTER TABLE portal' --include=*.go --include=*.sql . ; then
+            echo "FAIL: fork must not alter upstream tables"; exit 1
+          fi
+          echo "OK: schema version untouched, fork state lives in its own table"

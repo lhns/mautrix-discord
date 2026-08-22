@@ -429,8 +429,39 @@ func fnSetRelay(ce *WrappedCommandEvent) {
 		return
 	}
 	log := ce.ZLog.With().Str("channel_id", portal.Key.ChannelID).Logger()
+	if portal.IsPrivateChat() {
+		// DMs have no webhook to speak through -- WebhookCreate is guild-only --
+		// so relaying here means sending through the invoking user's own Discord
+		// session instead. Only the portal receiver can do that: nobody else's
+		// account is in this conversation.
+		relayCfg := portal.bridge.Config.Bridge.Relay
+		if !relayCfg.Enabled {
+			ce.Reply("Relay mode is not enabled in the bridge config")
+			return
+		} else if relayCfg.AdminOnly && ce.User.PermissionLevel < bridgeconfig.PermissionLevelAdmin {
+			ce.Reply("Only bridge admins are allowed to enable relay mode")
+			return
+		} else if ce.User.DiscordID != portal.Key.Receiver {
+			ce.Reply("Only the Discord account this DM belongs to can relay for it")
+			return
+		} else if ce.User.Session == nil {
+			ce.Reply("You're not logged into Discord")
+			return
+		} else if existing := portal.bridge.GetDMRelayUser(portal.Key); existing != "" {
+			ce.Reply("This DM already relays through %s", existing)
+			return
+		}
+		if err := portal.bridge.SetDMRelayUser(portal.Key, ce.User.MXID); err != nil {
+			log.Err(err).Msg("Failed to save DM relay setting")
+			ce.Reply("Failed to save relay setting: %v", err)
+			return
+		}
+		ce.Reply("Relaying enabled. Messages from other users in this room will be sent " +
+			"to Discord through your account, prefixed with the sender's name.")
+		return
+	}
 	if portal.GuildID == "" {
-		ce.Reply("Only guild channels can have relays")
+		ce.Reply("Only guild channels and DMs can have relays")
 		return
 	} else if portal.RelayWebhookID != "" {
 		webhookMeta, err := relayClient.WebhookWithToken(portal.RelayWebhookID, portal.RelayWebhookSecret)
@@ -522,6 +553,18 @@ var cmdUnsetRelay = &commands.FullHandler{
 }
 
 func fnUnsetRelay(ce *WrappedCommandEvent) {
+	if ce.Portal.IsPrivateChat() {
+		if ce.Portal.bridge.GetDMRelayUser(ce.Portal.Key) == "" {
+			ce.Reply("This DM doesn't have relaying enabled")
+			return
+		}
+		if err := ce.Portal.bridge.ClearDMRelayUser(ce.Portal.Key); err != nil {
+			ce.Reply("Failed to clear relay setting: %v", err)
+			return
+		}
+		ce.Reply("Relaying disabled")
+		return
+	}
 	if ce.Portal.RelayWebhookID == "" {
 		ce.Reply("This portal doesn't have a relay webhook")
 		return

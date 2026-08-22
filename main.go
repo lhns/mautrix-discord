@@ -73,6 +73,11 @@ type DiscordBridge struct {
 	guildsByID   map[string]*Guild
 	guildsLock   sync.Mutex
 
+	// DM relay settings, kept in memory so the send path does not query per
+	// message. Backed by the fork-owned lhns_dm_relay table (see dmrelay.go).
+	dmRelay     map[database.PortalKey]id.UserID
+	dmRelayLock sync.RWMutex
+
 	puppets             map[string]*Puppet
 	puppetsByCustomMXID map[id.UserID]*Puppet
 	puppetsLock         sync.Mutex
@@ -101,6 +106,11 @@ func (br *DiscordBridge) Init() {
 	matrixHTMLParser.PillConverter = br.pillConverter
 
 	br.DB = database.New(br.Bridge.DB, br.Log.Sub("Database"))
+	// Here rather than in Start(): Start() only runs once the homeserver is
+	// reachable, and this table has nothing to do with the homeserver. It is
+	// independent of the framework's schema, so running before its upgrades is
+	// fine.
+	br.initDMRelay()
 	discordLog = br.ZLog.With().Str("component", "discordgo").Logger()
 }
 

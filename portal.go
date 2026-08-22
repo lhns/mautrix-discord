@@ -1539,19 +1539,20 @@ func (portal *Portal) handleMatrixMessage(sender *User, evt *event.Event) {
 
 	// DM relay. A private chat has no webhook to speak through (Discord only
 	// offers webhooks on guild channels), so a message from anyone who is not
-	// the portal receiver goes out through the RECEIVER'S OWN session with the
-	// sender's name prefixed -- the mautrix-whatsapp model.
+	// the portal receiver goes out through the relay user's OWN session with the
+	// sender's name prefixed -- the mautrix-whatsapp model. Opt-in per portal
+	// via `set-relay`, which records the relay user in the lhns_dm_relay table.
 	//
-	// `sender` is deliberately reassigned to the receiver here: every use below
+	// `sender` is deliberately reassigned to the relay user here: every use below
 	// it (sess, attachment upload via sender.Session, the IsPrivateChat receiver
 	// check) must act as the account that actually sends. relayOrigin keeps the
 	// real Matrix sender for the name prefix and for database attribution.
 	var relayOrigin *User
 	if portal.IsPrivateChat() && sender.DiscordID != portal.Key.Receiver {
-		if receiver := portal.dmRelayReceiver(sender); receiver != nil {
+		if relayer := portal.dmRelayUser(); relayer != nil {
 			relayOrigin = sender
-			sender = receiver
-			sess = receiver.Session
+			sender = relayer
+			sess = relayer.Session
 		}
 	}
 
@@ -1856,6 +1857,9 @@ func (portal *Portal) HandleMatrixKick(brSender bridge.User, brTarget bridge.Gho
 func (portal *Portal) HandleMatrixInvite(brSender bridge.User, brTarget bridge.Ghost) {}
 
 func (portal *Portal) Delete() {
+	if err := portal.bridge.ClearDMRelayUser(portal.Key); err != nil {
+		portal.log.Warn().Err(err).Msg("Failed to clear DM relay setting while deleting portal")
+	}
 	portal.Portal.Delete()
 	portal.bridge.portalsLock.Lock()
 	delete(portal.bridge.portalsByID, portal.Key)
@@ -2701,28 +2705,20 @@ func (br *DiscordBridge) HandleTombstone(evt *event.Event) {
 	portal.UpdateBridgeInfo()
 }
 
-// dmRelayReceiver returns the portal receiver's User when `sender` may be
-// relayed through it in a DM portal, or nil when relaying does not apply.
+// dmRelayUser returns the User whose Discord session relays for this DM portal,
+// or nil when relaying is off or that user cannot currently send.
 //
-// Gating mirrors mautrix-whatsapp: relay must be enabled, and the sender must
-// clear the configured permission level (admin when admin_only, otherwise the
-// `relay` level). The receiver must also actually be connected -- there is no
-// point rewriting the sender if nothing can send.
-func (portal *Portal) dmRelayReceiver(sender *User) *User {
-	cfg := portal.bridge.Config.Bridge.Relay
-	if !cfg.Enabled {
+// The permission gating lives in `set-relay` rather than here, matching
+// mautrix-whatsapp: enabling relay is the privileged act, and once a portal is
+// marked, anyone in the room is relayed.
+func (portal *Portal) dmRelayUser() *User {
+	relayMXID := portal.bridge.GetDMRelayUser(portal.Key)
+	if relayMXID == "" {
 		return nil
 	}
-	minLevel := bridgeconfig.PermissionLevelRelay
-	if cfg.AdminOnly {
-		minLevel = bridgeconfig.PermissionLevelAdmin
-	}
-	if sender.PermissionLevel < minLevel {
+	relayer := portal.bridge.GetUserByMXID(relayMXID)
+	if relayer == nil || relayer.Session == nil {
 		return nil
 	}
-	receiver := portal.bridge.GetUserByID(portal.Key.Receiver)
-	if receiver == nil || receiver.Session == nil {
-		return nil
-	}
-	return receiver
+	return relayer
 }
