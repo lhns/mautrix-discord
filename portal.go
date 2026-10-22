@@ -690,6 +690,11 @@ func (portal *Portal) handleDiscordMessageCreate(user *User, msg *discordgo.Mess
 				Int("part_index", i).
 				Str("attachment_id", part.AttachmentID).
 				Msg("Failed to send part of message to Matrix")
+			// Exit before markMessageHandled so the restart's missed-message backfill
+			// re-fetches the message instead of it being lost.
+			if isRetryableMatrixError(err) {
+				exitForRestart(&log, err, "Homeserver unreachable while sending message")
+			}
 			continue
 		}
 		lastThreadEvent = resp.EventID

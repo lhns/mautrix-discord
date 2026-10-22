@@ -9,6 +9,8 @@
 #     and no retry, and discordgo silently skips its own retry when a 429 body is
 #     not JSON (Cloudflare HTML), producing truncated history that reports
 #     success. See mautrix/discord#157.
+#   - exit on retryable homeserver failures while bridging a message, so the restart's
+#     missed-message backfill recovers it instead of it being dropped.
 #   - DM relay through the portal receiver's own account, because `set-relay` is
 #     webhook-based and Discord has no webhook API for DMs.
 #
@@ -29,7 +31,7 @@ env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/mautrix-discord
   # Upstream release this patch is applied on top of, plus the patch level.
   BASE_VERSION: v0.7.7
-  PATCH_LEVEL: lhns.4
+  PATCH_LEVEL: lhns.5
 
 jobs:
   build:
