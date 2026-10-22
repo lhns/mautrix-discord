@@ -65,7 +65,7 @@ func (portal *Portal) convertDiscordFile(ctx context.Context, typeName string, i
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to copy attachment to Matrix")
 		// A "Failed to bridge media" notice would be stored as the message; restart and backfill instead.
 		if isRetryableHTTPError(err) {
-			exitForRestart(zerolog.Ctx(ctx), err, "Homeserver unreachable while uploading attachment")
+			exitForRestart(zerolog.Ctx(ctx), err, "Homeserver unavailable while uploading attachment")
 		}
 		return portal.createMediaFailedMessage(err)
 	}

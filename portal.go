@@ -14,7 +14,6 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -693,7 +692,7 @@ func (portal *Portal) handleDiscordMessageCreate(user *User, msg *discordgo.Mess
 			// Exit before markMessageHandled so the restart's missed-message backfill
 			// re-fetches the message instead of it being lost.
 			if isRetryableMatrixError(err) {
-				exitForRestart(&log, err, "Homeserver unreachable while sending message")
+				exitForRestart(&log, err, "Homeserver unavailable while sending message")
 			}
 			continue
 		}
@@ -2774,7 +2773,7 @@ func (portal *Portal) groupDMParticipants() string {
 	if len(names) == 0 {
 		return ""
 	}
-	sort.Strings(names) // map order would rename the room on every sync
+	slices.Sort(names) // map order would rename the room on every sync
 	if len(names) > 4 {
 		return fmt.Sprintf("%s +%d", strings.Join(names[:4], ", "), len(names)-4)
 	}
