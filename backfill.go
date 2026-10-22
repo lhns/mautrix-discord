@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"time"
 
@@ -108,6 +110,38 @@ func (portal *Portal) ForwardBackfillMissed(source *User, serverLastMessageID st
 
 const messageFetchChunkSize = 50
 
+// fetchBackfillChunk retries failed fetches: discordgo skips its own retry when a 429 body isn't JSON.
+func (portal *Portal) fetchBackfillChunk(log zerolog.Logger, source *User, channelID, before, after string) ([]*discordgo.Message, error) {
+	cfg := portal.bridge.Config.Bridge.Backfill
+	for attempt := 0; ; attempt++ {
+		messages, err := source.Session.ChannelMessages(channelID, messageFetchChunkSize, before, after, "", portal.RefererOptIfUser(source.Session, channelID)...)
+		if err == nil {
+			return messages, nil
+		} else if attempt >= cfg.MaxRetries || isPermanentDiscordError(err) {
+			log.Err(err).Int("attempts", attempt+1).Msg("Giving up fetching messages for backfill")
+			return nil, err
+		}
+		log.Warn().Err(err).Int("attempt", attempt+1).Int("retry_in_ms", cfg.RetryIntervalMS).Msg("Failed to fetch messages for backfill, retrying")
+		time.Sleep(time.Duration(cfg.RetryIntervalMS) * time.Millisecond)
+	}
+}
+
+// isPermanentDiscordError is a 4xx other than 429, which waiting cannot fix.
+func isPermanentDiscordError(err error) bool {
+	var restErr *discordgo.RESTError
+	if !errors.As(err, &restErr) || restErr.Response == nil {
+		return false
+	}
+	code := restErr.Response.StatusCode
+	return code >= 400 && code < 500 && code != http.StatusTooManyRequests
+}
+
+func (portal *Portal) backfillFetchDelay() {
+	if delay := portal.bridge.Config.Bridge.Backfill.FetchDelayMS; delay > 0 {
+		time.Sleep(time.Duration(delay) * time.Millisecond)
+	}
+}
+
 func (portal *Portal) collectBackfillMessages(log zerolog.Logger, source *User, limit int, until string, thread *Thread) ([]*discordgo.Message, bool, error) {
 	var messages []*discordgo.Message
 	var before string
@@ -118,19 +152,9 @@ func (portal *Portal) collectBackfillMessages(log zerolog.Logger, source *User, 
 	}
 	for {
 		log.Debug().Str("before_id", before).Msg("Fetching messages for backfill")
-		bfCfg := portal.bridge.Config.Bridge.Backfill
-		var newMessages []*discordgo.Message
-		var err error
-		for attempt := 0; ; attempt++ {
-			newMessages, err = source.Session.ChannelMessages(protoChannelID, messageFetchChunkSize, before, "", "", portal.RefererOptIfUser(source.Session, protoChannelID)...)
-			if err == nil {
-				break
-			} else if attempt >= bfCfg.MaxRetries {
-				log.Err(err).Int("attempts", attempt+1).Msg("Giving up fetching messages for backfill")
-				return nil, false, err
-			}
-			log.Warn().Err(err).Int("attempt", attempt+1).Int("retry_in_ms", bfCfg.RetryIntervalMS).Msg("Failed to fetch messages for backfill, retrying")
-			time.Sleep(time.Duration(bfCfg.RetryIntervalMS) * time.Millisecond)
+		newMessages, err := portal.fetchBackfillChunk(log, source, protoChannelID, before, "")
+		if err != nil {
+			return nil, false, err
 		}
 		if until != "" {
 			for i, msg := range newMessages {
@@ -151,9 +175,7 @@ func (portal *Portal) collectBackfillMessages(log zerolog.Logger, source *User, 
 			break
 		}
 		before = newMessages[len(newMessages)-1].ID
-		if bfCfg.FetchDelayMS > 0 {
-			time.Sleep(time.Duration(bfCfg.FetchDelayMS) * time.Millisecond)
-		}
+		portal.backfillFetchDelay()
 	}
 	if len(messages) > limit {
 		foundAll = false
@@ -197,7 +219,7 @@ func (portal *Portal) backfillUnlimitedMissed(log zerolog.Logger, source *User, 
 	}
 	for {
 		log.Debug().Str("after_id", after).Msg("Fetching chunk of messages to backfill")
-		messages, err := source.Session.ChannelMessages(protoChannelID, messageFetchChunkSize, "", after, "", portal.RefererOptIfUser(source.Session, protoChannelID)...)
+		messages, err := portal.fetchBackfillChunk(log, source, protoChannelID, "", after)
 		if err != nil {
 			log.Err(err).Msg("Error fetching chunk of messages to forward backfill")
 			return
@@ -213,6 +235,7 @@ func (portal *Portal) backfillUnlimitedMissed(log zerolog.Logger, source *User, 
 			return
 		}
 		after = messages[len(messages)-1].ID
+		portal.backfillFetchDelay()
 	}
 }
 

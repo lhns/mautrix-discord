@@ -16,8 +16,6 @@
 package main
 
 import (
-	"database/sql"
-
 	"maunium.net/go/mautrix/id"
 
 	"go.mau.fi/mautrix-discord/database"
@@ -94,7 +92,7 @@ func (br *DiscordBridge) SetDMRelayUser(key database.PortalKey, user id.UserID) 
 func (br *DiscordBridge) ClearDMRelayUser(key database.PortalKey) error {
 	_, err := br.DB.Exec(`DELETE FROM lhns_dm_relay WHERE dcid=$1 AND receiver=$2`,
 		key.ChannelID, key.Receiver)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
 		return err
 	}
 	br.dmRelayLock.Lock()
