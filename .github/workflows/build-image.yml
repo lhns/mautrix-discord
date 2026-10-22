@@ -13,10 +13,11 @@
 #     missed-message backfill recovers it instead of it being dropped.
 #   - DM relay through the portal receiver's own account, because `set-relay` is
 #     webhook-based and Discord has no webhook API for DMs.
+#   - untitled group DMs named after their participants.
 #
 # Tagging is deliberately explicit rather than :latest. The k0s-flux deployment pins
 # a digest, and a floating tag on a FORK is how you end up not knowing which patch
-# level is running. `-throttle.N` is bumped by hand when the patch itself changes;
+# level is running. PATCH_LEVEL (`lhns.N`) is bumped by hand when the patch itself changes;
 # the sha tag is what makes any build individually addressable.
 #
 # amd64 only: every node in the target cluster is amd64 (verified), and arm64 would
@@ -61,7 +62,7 @@ jobs:
             ${{ env.IMAGE }}:sha-${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.description=mautrix-discord ${{ env.BASE_VERSION }} with configurable backfill fetch delay, bounded retry, and DM relay
+            org.opencontainers.image.description=mautrix-discord ${{ env.BASE_VERSION }} with configurable backfill fetch delay, bounded retry, DM relay, group DM names, and exit-on-homeserver-failure
             org.opencontainers.image.licenses=AGPL-3.0-or-later
 
       - name: Report digest

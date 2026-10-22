@@ -32,7 +32,7 @@ jobs:
 
       - name: gofmt
         run: |
-          out=$(gofmt -l backfill.go portal.go config/bridge.go config/upgrade.go)
+          out=$(gofmt -l backfill.go commands.go dmrelay.go main.go matrixretry.go matrixretry_test.go portal.go portal_convert.go config/bridge.go config/upgrade.go)
           if [ -n "$out" ]; then echo "not gofmt-clean:"; echo "$out"; exit 1; fi
 
       - name: go vet
